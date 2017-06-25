@@ -22,7 +22,7 @@
 #define USRCNT 2
 #define MAXLINE 4096
 #define INVALID_SOCKET -1
-#define ROOT_DIR "d:/cgwin/home/adtim/linux/ftp" // 根目录
+#define ROOT_DIR "/home/adtim/ftp" // 根目录
 
 typedef struct userInfo
 {

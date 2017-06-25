@@ -42,6 +42,12 @@ int isFile(const char* path)
 		return 1;
 }
 
+void closesocket(int fd,ftpuser* ftpusr)
+{
+	close(fd);
+	ftpusr->datafd = INVALID_SOCKET;	
+}
+
 int buildDatafd(ftpuser * ftpusr)
 {
 	if(ftpusr->datafd == INVALID_SOCKET)
@@ -128,7 +134,7 @@ const char* getList(char* path)
 		if(S_ISREG(bufstat.st_mode))
 		{
 			getmode(bufstat.st_mode,info);
-			//strcat(info,"1 ");
+			strcat(info,"1 ");
 			strcat(info,"adtim ");
 			strcat(info,"adtim ");
 			char tmp[20];
@@ -160,7 +166,7 @@ const char* getList(char* path)
 		lstat(tmpname,&bufstat);
 		bzero(info,sizeof(info));
 		getmode(bufstat.st_mode,info);
-		//strcat(info,"1 ");
+		strcat(info,"1 ");
 		strcat(info,"adtim ");
 		strcat(info,"adtim ");
 		char tmp[20];
@@ -216,7 +222,7 @@ void do_user(const char* arg,ftpuser* ftpusr)
 	{
 		strcpy(ftpusr->username,arg);
 		ftpusr->usrID = -1;
-		ftpusr->message = "331 User name okay, need password.\r\n";
+		ftpusr->message = "331 User name okay, need password.\n";
 		write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
 	}
 }
@@ -277,12 +283,12 @@ void do_cwd(const char*arg,ftpuser* ftpusr)
 	}
 	strcpy(str,arg);
 	char tmp[256];
-	strcpy(tmp,ROOT_DIR);
 	if(str[0] != '/') // 相对路径
 		strcat(tmp,ftpusr->curPath);
-	strcat(tmp,str);
-	
-	if(isDir(tmp)){
+	strcat(tmp,arg);
+	strcpy(str,ROOT_DIR);
+	strcat(str,tmp);
+	if(isDir(str)){
 		strcpy(ftpusr->curPath,tmp);
 		ftpusr->message = "250 Directory changed.\r\n";
 		write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
@@ -455,17 +461,20 @@ void do_retr(const char *arg,ftpuser *ftpusr)
 				int n;
 				int fd = open(path,O_RDONLY);
 				lseek(fd,ftpusr->filepos,SEEK_SET);
+				ftpusr->message = "150 Opening data connection.\r\n";
+				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
 				while((n = read(fd,buf,MAXLINE)) > 0)
 					write(clientDataSock,buf,n);
 				ftpusr->message = "226 Transfer complete,closing data connection.\r\n";
 				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-				close(clientDataSock);
+				closesocket(clientDataSock,ftpusr);
 
 			}else
 			{
 				ftpusr->message ="425 Can't open data connection.\r\n";
 				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-				close(clientDataSock);
+		//		close(clientDataSock);
+				ftpusr->datafd = INVALID_SOCKET;
 			}
 		}else
 		{
@@ -497,27 +506,23 @@ void do_stor(const char* arg,ftpuser *ftpusr)
 			strcat(path,ftpusr->curPath);
 		strcat(path,arg);
 		
-		if(isFile(path))
-		{
-			if((clientDataSock = buildDatafd(ftpusr)) > 0){
-				char buf[MAXLINE];
-				int n;
-				int fd = open(path,O_WRONLY | O_CREAT,0764);
-				while((n = read(fd,buf,MAXLINE)) > 0)
-					write(clientDataSock,buf,n);
+		if((clientDataSock = buildDatafd(ftpusr)) > 0){
+			char buf[MAXLINE];
+			int n;
+			int fd = open(path,O_WRONLY | O_CREAT | O_TRUNC,0764);
+			ftpusr->message = "150 Opening data connection.\r\n";
+			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
+			while((n = read(clientDataSock,buf,MAXLINE)) > 0){
+				write(fd,buf,n);
 				ftpusr->message = "226 Transfer complete,closing data connection.\r\n";
 				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-				close(clientDataSock);
-			}else
-			{
-				ftpusr->message = "425 Can't open data connection.\r\n";
-				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-				close(clientDataSock);
+				closesocket(clientDataSock,ftpusr);
 			}
-		}else
-		{
-			ftpusr->message = "550 No such file.\r\n";
+		}else{
+			ftpusr->message = "425 Can't open data connection.\r\n";
 			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
+			//	close(clientDataSock);
+			ftpusr->datafd = INVALID_SOCKET;
 		}
 	}else
 	{
@@ -715,8 +720,9 @@ void do_pwd(const char* arg,ftpuser *ftpusr)
 {
 	char tmp[256];
 	strcpy(tmp,"257 ");
-	strcat(tmp,ROOT_DIR);
+	strcat(tmp,"\"");
 	strcat(tmp,ftpusr->curPath);
+	strcat(tmp,"\" is current directory");
 	strcat(tmp,"\r\n");
 	ftpusr->message = tmp;
 	write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
@@ -732,17 +738,17 @@ void do_list(const char* arg,ftpuser *ftpusr)
 		strcpy(path,ROOT_DIR);
 		if(strcmp("",arg) == 0 || arg[0] !='/')
 			strcat(path,ftpusr->curPath);
-		//strcat(path,arg);
+	//	printf("%s\n",path);
 		if((clientDataSock = buildDatafd(ftpusr)) > 0)
 		{
-			printf("%s\n",path);
 			p = getList(path);
-			ftpusr->message = "2017/06/21 09:24 <DIR> contacts\n";
-			printf("ok %d\n",write(clientDataSock,ftpusr->message,strlen(ftpusr->message)));
-			//write(clientDataSock,p,strlen(p));
+	//		printf("%s\n",p);
+			ftpusr->message = "150 Opening ASCII mode data connection for directory list.\r\n";
+			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
+			write(clientDataSock,p,strlen(p));
 			ftpusr->message = "226 Transfer complete,closing data connection.\r\n";
 			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-			close(clientDataSock);
+			closesocket(clientDataSock,ftpusr);
 		}else
 		{
 			ftpusr->message = "425 Can't open data connection.\r\n";
