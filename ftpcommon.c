@@ -375,7 +375,7 @@ void do_pasv(const char* arg,ftpuser *ftpusr)
 									port / 256, port % 256);
 		ftpusr->message = str;
 		write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-		//fdtmp = accept(ftpusr->datafd,NULL,NULL);
+		printf("successfully pasv\n");
 	}
 }
 
@@ -465,10 +465,9 @@ void do_retr(const char *arg,ftpuser *ftpusr)
 				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
 				while((n = read(fd,buf,MAXLINE)) > 0)
 					write(clientDataSock,buf,n);
+				closesocket(clientDataSock,ftpusr);
 				ftpusr->message = "226 Transfer complete,closing data connection.\r\n";
 				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-				closesocket(clientDataSock,ftpusr);
-
 			}else
 			{
 				ftpusr->message ="425 Can't open data connection.\r\n";
@@ -509,19 +508,19 @@ void do_stor(const char* arg,ftpuser *ftpusr)
 		if((clientDataSock = buildDatafd(ftpusr)) > 0){
 			char buf[MAXLINE];
 			int n;
-			int fd = open(path,O_WRONLY | O_CREAT | O_TRUNC,0764);
+			int fd = open(path,O_WRONLY | O_CREAT | O_TRUNC,0664);		
 			ftpusr->message = "150 Opening data connection.\r\n";
 			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-			while((n = read(clientDataSock,buf,MAXLINE)) > 0){
+			while((n = read(clientDataSock,buf,MAXLINE)) > 0)
 				write(fd,buf,n);
-				ftpusr->message = "226 Transfer complete,closing data connection.\r\n";
-				write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-				closesocket(clientDataSock,ftpusr);
-			}
+			closesocket(clientDataSock,ftpusr);
+			ftpusr->message = "226 Transfer complete,closing data connection.\r\n";
+			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
+		//	closesocket(clientDataSock,ftpusr);
 		}else{
 			ftpusr->message = "425 Can't open data connection.\r\n";
 			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
-			//	close(clientDataSock);
+		//	close(clientDataSock);
 			ftpusr->datafd = INVALID_SOCKET;
 		}
 	}else
@@ -738,11 +737,9 @@ void do_list(const char* arg,ftpuser *ftpusr)
 		strcpy(path,ROOT_DIR);
 		if(strcmp("",arg) == 0 || arg[0] !='/')
 			strcat(path,ftpusr->curPath);
-	//	printf("%s\n",path);
 		if((clientDataSock = buildDatafd(ftpusr)) > 0)
 		{
 			p = getList(path);
-	//		printf("%s\n",p);
 			ftpusr->message = "150 Opening ASCII mode data connection for directory list.\r\n";
 			write(ftpusr->sockfd,ftpusr->message,strlen(ftpusr->message));
 			write(clientDataSock,p,strlen(p));
